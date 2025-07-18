@@ -28,8 +28,6 @@ Then to run it you will need to find the 4-character subtype and manufacturer co
 # With verbose output
 ./AudioUnitHost --subtype "Pt8q" --manufacturer "Mdrt" --verbose
 
-# Custom host and port
-./AudioUnitHost -s "Pt8q" -m "Mdrt" -h "192.168.1.100" -p 8888 -v
 ```
 
 ## Command line options
