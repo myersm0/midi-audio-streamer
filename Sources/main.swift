@@ -17,14 +17,83 @@ do {
 	// Initialize network manager
 	let networkManager = NetworkManager(config: globalConfig)
 	
+	// Optionally initialize RPC client
+	var rpcClient: ModarttRPC?
+	if globalConfig.rpcEnabled {
+		rpcClient = ModarttRPC(host: globalConfig.rpcHost, port: globalConfig.rpcPort)
+		
+		if let info = rpcClient?.getInfo() {
+			print("\nConnected to RPC server:")
+			if let productName = info["product_name"] as? String {
+				print("  Product: \(productName)")
+			}
+			if let version = info["version"] as? String {
+				print("  Version: \(version)")
+			}
+			if let preset = info["current_preset"] as? [String: Any],
+			   let name = preset["name"] as? String {
+				print("  Current Preset: \(name)")
+			}
+			
+			verboseLog("Starting RPC monitoring thread...")
+			
+			// Start RPC monitoring thread
+			let rpcQueue = DispatchQueue(label: "rpc.monitor", qos: .background)
+			rpcQueue.async {
+				var lastPresetName: String?
+				var lastParameters: [[String: Any]]?
+				
+				while true {
+					Thread.sleep(forTimeInterval: 0.5)
+					
+					verboseLog("Polling RPC server...")
+					
+					if let info = rpcClient?.getInfo() {
+						verboseLog("Got info from RPC server")
+						
+						if let preset = info["current_preset"] as? [String: Any],
+						   let name = preset["name"] as? String {
+							if name != lastPresetName {
+								print("\n[RPC] Preset changed to: \(name)")
+								lastPresetName = name
+								lastParameters = nil
+							}
+						}
+					}
+					
+					if let currentParams = rpcClient?.getParameters() {
+						if let lastParams = lastParameters {
+							let changes = rpcClient?.compareParameters(old: lastParams, new: currentParams) ?? []
+							
+							for change in changes {
+								if let id = change["id"] as? String,
+								   let name = change["name"] as? String,
+								   let text = change["text"] as? String {
+									print("[RPC] Parameter changed: \(name) = \(text) (id: \(id))")
+								}
+							}
+						}
+						
+						lastParameters = currentParams
+					} else {
+						verboseLog("Failed to get parameters from RPC server")
+					}
+				}
+			}
+		} else {
+			print("\nWarning: Could not connect to RPC server at \(globalConfig.rpcHost):\(globalConfig.rpcPort)")
+		}
+	}
+	
 	// Prevent unused variable warnings by using them in a conditional
 	_ = midiManager  // MIDI manager stays alive for callbacks
+	_ = rpcClient  // RPC client stays alive if enabled
 	
 	// Main audio loop
 	let bufferSize: UInt32 = 512
 	let audioQueue = DispatchQueue(label: "audio.render", qos: .userInteractive)
 	
-	print("\nAudio streaming started. Play your MIDI device.")
+	print("\nAudio streaming started. Play your MIDI device!")
 	print("Press Ctrl+C to stop.\n")
 	
 	audioQueue.async {

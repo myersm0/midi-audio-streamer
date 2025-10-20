@@ -6,6 +6,9 @@ struct Config {
 	let verbose: Bool
 	let port: Int
 	let host: String
+	let rpcHost: String
+	let rpcPort: Int
+	let rpcEnabled: Bool
 	
 	static func parse() -> Config {
 		let args = CommandLine.arguments
@@ -15,6 +18,9 @@ struct Config {
 		var verbose = false
 		var port = 9999
 		var host = "127.0.0.1"
+		var rpcHost = "127.0.0.1"
+		var rpcPort = 8081
+		var rpcEnabled = false
 		
 		var i = 1
 		while i < args.count {
@@ -46,6 +52,21 @@ struct Config {
 				}
 				host = args[i + 1]
 				i += 2
+			case "--rpc-host":
+				guard i + 1 < args.count else {
+					fatalError("Missing value for --rpc-host")
+				}
+				rpcHost = args[i + 1]
+				i += 2
+			case "--rpc-port":
+				guard i + 1 < args.count else {
+					fatalError("Missing value for --rpc-port")
+				}
+				rpcPort = Int(args[i + 1]) ?? 8081
+				i += 2
+			case "--enable-rpc":
+				rpcEnabled = true
+				i += 1
 			case "--help":
 				printUsage()
 				exit(0)
@@ -67,7 +88,10 @@ struct Config {
 			componentManufacturer: componentManufacturer,
 			verbose: verbose,
 			port: port,
-			host: host
+			host: host,
+			rpcHost: rpcHost,
+			rpcPort: rpcPort,
+			rpcEnabled: rpcEnabled
 		)
 	}
 	
@@ -76,17 +100,21 @@ struct Config {
 		Usage: AudioUnitHost [OPTIONS]
 		
 		Required:
-		  -s, --subtype SUBTYPE           Audio unit subtype (e.g., "Pt8q")
+		  -s, --subtype SUBTYPE           Audio unit subtype (e.g., "Pt9q")
 		  -m, --manufacturer MANUFACTURER Audio unit manufacturer (e.g., "Mdrt")
 		
 		Optional:
 		  -v, --verbose                   Enable verbose output
 		  -p, --port PORT                 TCP port (default: 9999)
 		  -h, --host HOST                 TCP host (default: 127.0.0.1)
+		  --enable-rpc                    Enable JSON-RPC monitoring
+		  --rpc-host HOST                 JSON-RPC host (default: 127.0.0.1)
+		  --rpc-port PORT                 JSON-RPC port (default: 8081)
 		  --help                          Show this help message
 		
 		Example:
-		  AudioUnitHost --subtype "Pt8q" --manufacturer "Mdrt" --verbose
+		  AudioUnitHost --subtype "Pt9q" --manufacturer "Mdrt" --verbose
+		  AudioUnitHost --subtype "Pt9q" --manufacturer "Mdrt" --enable-rpc
 		""")
 	}
 }
