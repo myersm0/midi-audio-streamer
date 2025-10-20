@@ -9,6 +9,8 @@ struct Config {
 	let rpcHost: String
 	let rpcPort: Int
 	let rpcEnabled: Bool
+	let rpcPollInterval: Double
+	let bufferSize: UInt32
 	
 	static func parse() -> Config {
 		let args = CommandLine.arguments
@@ -21,6 +23,8 @@ struct Config {
 		var rpcHost = "127.0.0.1"
 		var rpcPort = 8081
 		var rpcEnabled = false
+		var rpcPollInterval = 0.5
+		var bufferSize: UInt32 = 512
 		
 		var i = 1
 		while i < args.count {
@@ -67,6 +71,18 @@ struct Config {
 			case "--enable-rpc":
 				rpcEnabled = true
 				i += 1
+			case "--rpc-poll-interval":
+				guard i + 1 < args.count else {
+					fatalError("Missing value for --rpc-poll-interval")
+				}
+				rpcPollInterval = Double(args[i + 1]) ?? 0.5
+				i += 2
+			case "--buffer-size":
+				guard i + 1 < args.count else {
+					fatalError("Missing value for --buffer-size")
+				}
+				bufferSize = UInt32(args[i + 1]) ?? 512
+				i += 2
 			case "--help":
 				printUsage()
 				exit(0)
@@ -91,7 +107,9 @@ struct Config {
 			host: host,
 			rpcHost: rpcHost,
 			rpcPort: rpcPort,
-			rpcEnabled: rpcEnabled
+			rpcEnabled: rpcEnabled,
+			rpcPollInterval: rpcPollInterval,
+			bufferSize: bufferSize
 		)
 	}
 	
@@ -107,9 +125,11 @@ struct Config {
 		  -v, --verbose                   Enable verbose output
 		  -p, --port PORT                 TCP port (default: 9999)
 		  -h, --host HOST                 TCP host (default: 127.0.0.1)
+		  --buffer-size SIZE              Audio buffer size in frames (default: 512)
 		  --enable-rpc                    Enable JSON-RPC monitoring
 		  --rpc-host HOST                 JSON-RPC host (default: 127.0.0.1)
 		  --rpc-port PORT                 JSON-RPC port (default: 8081)
+		  --rpc-poll-interval SECONDS     RPC polling interval (default: 0.5)
 		  --help                          Show this help message
 		
 		Example:

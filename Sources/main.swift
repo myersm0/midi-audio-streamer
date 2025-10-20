@@ -90,7 +90,7 @@ do {
 	_ = rpcClient  // RPC client stays alive if enabled
 	
 	// Main audio loop
-	let bufferSize: UInt32 = 512
+	let bufferSize = globalConfig.bufferSize
 	let audioQueue = DispatchQueue(label: "audio.render", qos: .userInteractive)
 	
 	print("\nAudio streaming started. Play your MIDI device!")
