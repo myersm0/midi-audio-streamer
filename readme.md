@@ -1,7 +1,7 @@
 # midi-audio-streamer
 
 ## Introduction
-A Swift application that loads and runs MIDI software instruments on macOS. Exposes the real-time audio buffer stream over TCP, allowing an external application (not included) to capture and handle the raw audio data. 
+A Swift application that loads and runs MIDI software instruments on macOS. Exposes the real-time audio buffer stream over a named pipe, allowing an external application (minimal example shown at the end of this readme) to capture and handle the raw audio data.
 
 Optionally, if your VST is by Modartt (i.e. Pianoteq or Organteq), you can monitor a JSON-RPC server to track your instrument's parameter changes and update in real-time.
 
@@ -107,18 +107,25 @@ To monitor parameter changes from Pianoteq or Organteq's GUI:
 - `--rpc-port PORT` - JSON-RPC server port (default: 8081)
 - `--rpc-poll-interval SECONDS` - How often to check for parameter changes (default: 0.5)
 
-## Project Structure
 
-```
-midi-audio-streamer/
-├── Package.swift
-├── Sources/
-│   ├── main.swift              # Main entry point and audio loop
-│   ├── Config.swift            # Command line argument parsing
-│   ├── AudioUnitManager.swift  # Software instrument loading and audio rendering
-│   ├── MIDIManager.swift       # MIDI keyboard input handling
-│   ├── NetworkManager.swift    # TCP network audio streaming
-│   └── ModarttRPC.swift        # JSON-RPC client for Pianoteq/Organteq
-└── README.md
-```
+### Example third-party client
+Here's a minimal client in the Julia language to listen to and process the audio buffer that this swift app serves:
+```julia
+const sample_rate = 44100
+const frames_per_block = 512
+const bytes_per_block = frames_per_block * sizeof(Float32)
 
+pipe_path = "/tmp/audio_pipe"
+
+# open pipe for reading (will block until Swift opens for writing)
+pipe = open(pipe_path, "r")
+println("Reading audio data...")
+
+while true
+    data = read(pipe, bytes_per_block)
+    floats = reinterpret(Float32, data)
+    # process audio...
+    max_amplitude = maximum(abs.(floats))
+    println("Max amplitude: $max_amplitude")
+end
+```
