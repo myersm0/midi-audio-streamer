@@ -3,7 +3,7 @@
 ## Introduction
 A Swift application that loads and runs MIDI software instruments on macOS. Exposes the real-time audio buffer stream over TCP, allowing an external application (not included) to capture and handle the raw audio data. 
 
-Optionally, if your VST is by Modartt (i.e. Pianoteq or Organteq), you can monitor a JSON-RPC server to track your instrument's parameter changes in real-time.
+Optionally, if your VST is by Modartt (i.e. Pianoteq or Organteq), you can monitor a JSON-RPC server to track your instrument's parameter changes and update in real-time.
 
 ## Requirements
 - macOS 13.0+
