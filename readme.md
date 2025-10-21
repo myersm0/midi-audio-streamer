@@ -14,8 +14,9 @@ Optionally, if your VST is by Modartt (i.e. Pianoteq or Organteq), you can monit
 ## Setup and installation
 
 ### Building
-To build, clone this repo, cd into the directory, and run:
 ```bash
+git clone https://github.com/myersm0/midi-audio-streamer
+cd midi-audio-streamer
 swift build -c release
 ```
 The executable will be created at `.build/release/AudioUnitHost`.
