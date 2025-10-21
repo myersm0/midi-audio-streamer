@@ -3,7 +3,7 @@
 ## Introduction
 A Swift application that loads and runs MIDI software instruments on macOS. Exposes the real-time audio buffer stream over TCP, allowing an external application (not included) to capture and handle the raw audio data. 
 
-Optionally, if your VST is by Modartt (i.e. Pianoteq or Organteq), you can monitor a JSON-RPC server to track your instrument's parameter changes in real-time.
+Optionally, if your VST is by Modartt (i.e. Pianoteq or Organteq), you can monitor a JSON-RPC server to track your instrument's parameter changes and update in real-time.
 
 ## Requirements
 - macOS 13.0+
@@ -14,8 +14,9 @@ Optionally, if your VST is by Modartt (i.e. Pianoteq or Organteq), you can monit
 ## Setup and installation
 
 ### Building
-To build, clone this repo, cd into the directory, and run:
 ```bash
+git clone https://github.com/myersm0/midi-audio-streamer
+cd midi-audio-streamer
 swift build -c release
 ```
 The executable will be created at `.build/release/AudioUnitHost`.
