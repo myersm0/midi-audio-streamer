@@ -39,16 +39,14 @@ class NetworkManager {
 	
 	func sendAudioData(_ data: Data) {
 		guard isConnected, let handle = fileHandle else {
-			verboseLog("Cannot send - not connected")
 			return
 		}
 		
 		do {
-			// Write directly to the pipe
 			try handle.write(contentsOf: data)
 			verboseLog("Wrote \(data.count) bytes to pipe")
 		} catch {
-			verboseLog("Write error: \(error)")
+			print("Pipe write error: \(error)")
 			isConnected = false
 		}
 	}
@@ -61,3 +59,4 @@ class NetworkManager {
 		try? fileHandle?.close()
 	}
 }
+

@@ -1,4 +1,3 @@
-
 import AVFoundation
 import AudioToolbox
 import Foundation
@@ -219,7 +218,7 @@ class AudioUnitManager {
 			if let audioData = audioBufferList[0].mData {
 				let floatPointer = audioData.assumingMemoryBound(to: Float.self)
 				
-				// Check for audio IN THE BUFFER
+				// Check for audio (optional monitoring)
 				var maxSample: Float = 0
 				var nonZeroCount = 0
 				for i in 0..<Int(frames) {
@@ -233,39 +232,10 @@ class AudioUnitManager {
 				}
 				
 				if maxSample > 0.0001 {
-					verboseLog("BUFFER audio level: \(maxSample), non-zero: \(nonZeroCount)/\(frames)")
+					verboseLog("Audio level: \(maxSample), non-zero: \(nonZeroCount)/\(frames)")
 				}
 				
-				// Create array copy
-				var floatArray = [Float](repeating: 0, count: Int(frames))
-				for i in 0..<Int(frames) {
-					floatArray[i] = floatPointer[i]
-				}
-				
-				// CHECK THE ARRAY IMMEDIATELY
-				let arrayNonZero = floatArray.filter { $0 != 0 }.count
-				let arrayMax = floatArray.map { abs($0) }.max() ?? 0
-				verboseLog("ARRAY after manual copy: \(arrayNonZero) non-zero, max=\(arrayMax)")
-				
-				// Convert to Data using a more explicit method
-				var copiedData = Data(count: Int(frames * 4))
-				copiedData.withUnsafeMutableBytes { destBuffer in
-					let destPointer = destBuffer.bindMemory(to: Float.self)
-					for i in 0..<Int(frames) {
-						destPointer[i] = floatArray[i]
-					}
-				}
-				
-				// CHECK THE DATA IMMEDIATELY
-				let dataCheck = copiedData.withUnsafeBytes { buffer -> (Int, Float) in
-					let floats = buffer.bindMemory(to: Float.self)
-					let nonZero = floats.filter { $0 != 0 }.count
-					let maxVal = floats.map { abs($0) }.max() ?? 0
-					return (nonZero, maxVal)
-				}
-				verboseLog("DATA after manual creation: \(dataCheck.0) non-zero, max=\(dataCheck.1)")
-				
-				return copiedData
+				return Data(bytes: audioData, count: Int(frames * 4))
 			}
 		} else if renderStatus != -10878 {  // -10878 is kAudioUnitErr_InvalidParameter
 			verboseLog("Render error: \(renderStatus)")
@@ -315,3 +285,4 @@ extension AudioUnitError: LocalizedError {
 		}
 	}
 }
+
