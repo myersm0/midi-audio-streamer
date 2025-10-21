@@ -1,10 +1,10 @@
+
 import AVFoundation
 import AudioToolbox
 import Foundation
 
 class AudioUnitManager {
 	let audioUnit: AudioComponentInstance
-	let outputUnit: AudioComponentInstance?
 	let outputFormat: AudioStreamBasicDescription
 	private var sampleTime: Float64 = 0
 	private let renderLock = NSLock()
@@ -12,7 +12,10 @@ class AudioUnitManager {
 	init(config: Config) throws {
 		verboseLog("Searching for audio unit with subtype: \(config.componentSubType), manufacturer: \(config.componentManufacturer)")
 		
-		// Find the audio unit
+		// Try multiple search strategies for macOS 26 compatibility
+		var component: AudioComponent?
+		
+		// Strategy 1: Standard search
 		var componentDescription = AudioComponentDescription(
 			componentType: kAudioUnitType_MusicDevice,
 			componentSubType: Self.makeFourCC(config.componentSubType),
@@ -21,7 +24,70 @@ class AudioUnitManager {
 			componentFlagsMask: 0
 		)
 		
-		guard let component = AudioComponentFindNext(nil, &componentDescription) else {
+		component = AudioComponentFindNext(nil, &componentDescription)
+		verboseLog("Strategy 1 (standard): \(component != nil ? "found" : "not found")")
+		
+		// Strategy 2: Search with sandbox-safe flag if Strategy 1 fails
+		if component == nil {
+			componentDescription.componentFlags = 0x00000001  // kAudioComponentFlag_SandboxSafe
+			componentDescription.componentFlagsMask = 0x00000001
+			component = AudioComponentFindNext(nil, &componentDescription)
+			verboseLog("Strategy 2 (sandbox safe): \(component != nil ? "found" : "not found")")
+		}
+		
+		// Strategy 3: Try iterating all components
+		if component == nil {
+			verboseLog("Strategy 3: Searching all available components...")
+			componentDescription.componentFlags = 0
+			componentDescription.componentFlagsMask = 0
+			
+			var currentComponent: AudioComponent? = nil
+			while true {
+				currentComponent = AudioComponentFindNext(currentComponent, &componentDescription)
+				guard let comp = currentComponent else { break }
+				
+				var desc = AudioComponentDescription()
+				AudioComponentGetDescription(comp, &desc)
+				
+				verboseLog("  Found component: type=\(Self.fourCCToString(desc.componentType)), sub=\(Self.fourCCToString(desc.componentSubType)), mfr=\(Self.fourCCToString(desc.componentManufacturer))")
+				
+				if desc.componentSubType == Self.makeFourCC(config.componentSubType) &&
+				   desc.componentManufacturer == Self.makeFourCC(config.componentManufacturer) {
+					component = comp
+					verboseLog("Strategy 3: Match found!")
+					break
+				}
+			}
+		}
+		
+		// Strategy 4: List all music devices to help debug
+		if component == nil {
+			verboseLog("Strategy 4: Listing all available music devices...")
+			var searchDesc = AudioComponentDescription(
+				componentType: kAudioUnitType_MusicDevice,
+				componentSubType: 0,
+				componentManufacturer: 0,
+				componentFlags: 0,
+				componentFlagsMask: 0
+			)
+			
+			var currentComponent: AudioComponent? = nil
+			while true {
+				currentComponent = AudioComponentFindNext(currentComponent, &searchDesc)
+				guard let comp = currentComponent else { break }
+				
+				var desc = AudioComponentDescription()
+				AudioComponentGetDescription(comp, &desc)
+				
+				var name: Unmanaged<CFString>?
+				AudioComponentCopyName(comp, &name)
+				let componentName = name?.takeRetainedValue() as String? ?? "Unknown"
+				
+				print("  Available: \(Self.fourCCToString(desc.componentSubType)) / \(Self.fourCCToString(desc.componentManufacturer)) - \(componentName)")
+			}
+		}
+		
+		guard let foundComponent = component else {
 			throw AudioUnitError.componentNotFound(subtype: config.componentSubType, manufacturer: config.componentManufacturer)
 		}
 		
@@ -29,7 +95,7 @@ class AudioUnitManager {
 		
 		// Create audio unit instance
 		var audioUnit: AudioComponentInstance?
-		let status = AudioComponentInstanceNew(component, &audioUnit)
+		let status = AudioComponentInstanceNew(foundComponent, &audioUnit)
 		guard status == noErr, let au = audioUnit else {
 			throw AudioUnitError.instantiationFailed(status: status)
 		}
@@ -78,61 +144,9 @@ class AudioUnitManager {
 		
 		print("Audio Unit initialized successfully")
 		
-		// Set up output unit
-		self.outputUnit = try Self.createOutputUnit(format: outputFormat)
-		
 		// Give audio unit time to fully initialize
 		Thread.sleep(forTimeInterval: 0.5)
 		verboseLog("Audio Unit initialization complete")
-	}
-	
-	private static func createOutputUnit(format: AudioStreamBasicDescription) throws -> AudioComponentInstance? {
-		var outputDescription = AudioComponentDescription(
-			componentType: kAudioUnitType_Output,
-			componentSubType: kAudioUnitSubType_DefaultOutput,
-			componentManufacturer: kAudioUnitManufacturer_Apple,
-			componentFlags: 0,
-			componentFlagsMask: 0
-		)
-		
-		guard let outputComponent = AudioComponentFindNext(nil, &outputDescription) else {
-			print("Warning: Could not find output audio unit")
-			return nil
-		}
-		
-		verboseLog("Found output audio unit")
-		
-		var outputUnit: AudioComponentInstance?
-		let outputStatus = AudioComponentInstanceNew(outputComponent, &outputUnit)
-		
-		guard outputStatus == noErr, let output = outputUnit else {
-			print("Warning: Failed to create output audio unit")
-			return nil
-		}
-		
-		verboseLog("Output audio unit instantiated")
-		
-		// Configure output with same format as main audio unit
-		var outputFormat = format
-		AudioUnitSetProperty(
-			output,
-			kAudioUnitProperty_StreamFormat,
-			kAudioUnitScope_Input,
-			0,
-			&outputFormat,
-			UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
-		)
-		
-		// Initialize and start output
-		guard AudioUnitInitialize(output) == noErr else {
-			print("Warning: Failed to initialize audio output")
-			return nil
-		}
-		
-		AudioOutputUnitStart(output)
-		print("Audio output initialized - you should hear sound now!")
-		
-		return output
 	}
 	
 	func processMIDIEvent(_ data: [UInt8]) {
@@ -201,37 +215,57 @@ class AudioUnitManager {
 		if renderStatus == noErr {
 			sampleTime += Float64(frames)
 			
-			// Play audio through speakers if we have an output unit
-			if let output = outputUnit {
-				var outputFlags = AudioUnitRenderActionFlags()
-				AudioUnitRender(
-					output,
-					&outputFlags,
-					&inTimeStamp,
-					0,
-					frames,
-					audioBufferList.unsafeMutablePointer
-				)
-			}
-			
 			// Get left channel data for network transmission
 			if let audioData = audioBufferList[0].mData {
 				let floatPointer = audioData.assumingMemoryBound(to: Float.self)
 				
-				// Check for audio
+				// Check for audio IN THE BUFFER
 				var maxSample: Float = 0
+				var nonZeroCount = 0
 				for i in 0..<Int(frames) {
 					let sample = abs(floatPointer[i])
-					if sample > maxSample && sample < 10.0 {  // Sanity check
+					if sample > maxSample && sample < 10.0 {
 						maxSample = sample
+					}
+					if sample > 0.0 {
+						nonZeroCount += 1
 					}
 				}
 				
 				if maxSample > 0.0001 {
-					verboseLog("Audio level: \(maxSample)")
+					verboseLog("BUFFER audio level: \(maxSample), non-zero: \(nonZeroCount)/\(frames)")
 				}
 				
-				return Data(bytes: audioData, count: Int(frames * 4))
+				// Create array copy
+				var floatArray = [Float](repeating: 0, count: Int(frames))
+				for i in 0..<Int(frames) {
+					floatArray[i] = floatPointer[i]
+				}
+				
+				// CHECK THE ARRAY IMMEDIATELY
+				let arrayNonZero = floatArray.filter { $0 != 0 }.count
+				let arrayMax = floatArray.map { abs($0) }.max() ?? 0
+				verboseLog("ARRAY after manual copy: \(arrayNonZero) non-zero, max=\(arrayMax)")
+				
+				// Convert to Data using a more explicit method
+				var copiedData = Data(count: Int(frames * 4))
+				copiedData.withUnsafeMutableBytes { destBuffer in
+					let destPointer = destBuffer.bindMemory(to: Float.self)
+					for i in 0..<Int(frames) {
+						destPointer[i] = floatArray[i]
+					}
+				}
+				
+				// CHECK THE DATA IMMEDIATELY
+				let dataCheck = copiedData.withUnsafeBytes { buffer -> (Int, Float) in
+					let floats = buffer.bindMemory(to: Float.self)
+					let nonZero = floats.filter { $0 != 0 }.count
+					let maxVal = floats.map { abs($0) }.max() ?? 0
+					return (nonZero, maxVal)
+				}
+				verboseLog("DATA after manual creation: \(dataCheck.0) non-zero, max=\(dataCheck.1)")
+				
+				return copiedData
 			}
 		} else if renderStatus != -10878 {  // -10878 is kAudioUnitErr_InvalidParameter
 			verboseLog("Render error: \(renderStatus)")
@@ -248,12 +282,18 @@ class AudioUnitManager {
 		return result
 	}
 	
+	private static func fourCCToString(_ fourCC: OSType) -> String {
+		let bytes: [UInt8] = [
+			UInt8((fourCC >> 24) & 0xFF),
+			UInt8((fourCC >> 16) & 0xFF),
+			UInt8((fourCC >> 8) & 0xFF),
+			UInt8(fourCC & 0xFF)
+		]
+		return String(bytes: bytes, encoding: .ascii) ?? "????"
+	}
+	
 	deinit {
 		AudioUnitUninitialize(audioUnit)
-		if let output = outputUnit {
-			AudioOutputUnitStop(output)
-			AudioUnitUninitialize(output)
-		}
 	}
 }
 

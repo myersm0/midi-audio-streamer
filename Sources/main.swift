@@ -42,9 +42,10 @@ do {
 			rpcQueue.async {
 				var lastPresetName: String?
 				var lastParameters: [[String: Any]]?
+				var lastModifiedState: Bool?
 				
 				while true {
-					Thread.sleep(forTimeInterval: 0.5)
+					Thread.sleep(forTimeInterval: globalConfig.rpcPollInterval)
 					
 					verboseLog("Polling RPC server...")
 					
@@ -58,6 +59,14 @@ do {
 								lastPresetName = name
 								lastParameters = nil
 							}
+						}
+						
+						if let modified = info["modified"] as? Bool {
+							if let lastMod = lastModifiedState, lastMod == true && modified == false {
+								print("[RPC] Preset reset to saved state")
+								lastParameters = nil
+							}
+							lastModifiedState = modified
 						}
 					}
 					
@@ -100,7 +109,10 @@ do {
 		while true {
 			autoreleasepool {
 				if let audioData = audioUnitManager.renderAudio(frames: bufferSize) {
+					verboseLog("Rendered \(audioData.count) bytes, sending to network...")
 					networkManager.sendAudioData(audioData)
+				} else {
+					verboseLog("No audio data rendered")
 				}
 			}
 			
