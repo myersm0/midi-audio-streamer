@@ -78,6 +78,10 @@ To monitor parameter changes from Pianoteq or Organteq's GUI:
 # Custom TCP host and port for audio streaming
 ./AudioUnitHost -s "Pt9q" -m "Mdrt" -h "192.168.1.100" -p 8888
 
+# Use planar format for better memory contiguity in per-channel processing
+# (for stereo, output will be e.g. LLRR instead of LRLR)
+./AudioUnitHost -s "Pt9q" -m "Mdrt" --format planar
+
 # Custom buffer size and RPC polling interval
 ./AudioUnitHost -s "Pt9q" -m "Mdrt" --enable-rpc \
   --buffer-size 1024 \
@@ -100,6 +104,7 @@ To monitor parameter changes from Pianoteq or Organteq's GUI:
 - `-p, --port PORT` - TCP port for audio streaming (default: 9999)
 - `-h, --host HOST` - TCP host for audio streaming (default: 127.0.0.1)
 - `--buffer-size SIZE` - Audio buffer size in frames (default: 512)
+- `--format FORMAT` - Audio output format: 'planar' or 'interleaved' (default: interleaved)
 
 ### Optional - JSON-RPC monitoring
 - `--enable-rpc` - Enable JSON-RPC parameter monitoring
@@ -112,20 +117,43 @@ To monitor parameter changes from Pianoteq or Organteq's GUI:
 Here's a minimal client in the Julia language to listen to and process the audio buffer that this swift app serves:
 ```julia
 const sample_rate = 44100
+const channel_count = 2
 const frames_per_block = 512
-const bytes_per_block = frames_per_block * sizeof(Float32)
+
+# for interleaved format (default)
+const samples_per_block = frames_per_block * channel_count
+const bytes_per_block = samples_per_block * sizeof(Float32)
 
 pipe_path = "/tmp/audio_pipe"
-
-# open pipe for reading (will block until Swift opens for writing)
 pipe = open(pipe_path, "r")
 println("Reading audio data...")
 
 while true
-    data = read(pipe, bytes_per_block)
-    floats = reinterpret(Float32, data)
-    # process audio...
-    max_amplitude = maximum(abs.(floats))
-    println("Max amplitude: $max_amplitude")
+	data = read(pipe, bytes_per_block)
+	interleaved = reinterpret(Float32, data)
+	
+	# deinterleave: LRLRLR... -> L, R
+	left = interleaved[1:channel_count:end]
+	right = interleaved[2:channel_count:end]
+	
+	max_left = maximum(abs.(left))
+	max_right = maximum(abs.(right))
+	println("L: $max_left, R: $max_right")
 end
 ```
+
+For planar format (--format planar), the data is already separated by channel:
+```julia
+while true
+	data = read(pipe, bytes_per_block)
+	floats = reinterpret(Float32, data)
+	
+	# channels are contiguous: LLL...RRR...
+	left = floats[1:frames_per_block]
+	right = floats[frames_per_block+1:2*frames_per_block]
+	
+	# or equivalently: 
+    channels = reshape(floats, frames_per_block, channel_count)
+end
+```
+
