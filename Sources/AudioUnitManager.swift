@@ -5,6 +5,7 @@ import Foundation
 class AudioUnitManager {
 	let audioUnit: AudioComponentInstance
 	let outputFormat: AudioStreamBasicDescription
+	let channelCount: UInt32
 	private var sampleTime: Float64 = 0
 	private let renderLock = NSLock()
 	
@@ -115,6 +116,7 @@ class AudioUnitManager {
 		)
 		
 		self.outputFormat = outputFormat
+		self.channelCount = outputFormat.mChannelsPerFrame
 		
 		print("Audio Unit's preferred format:")
 		print("  Sample Rate: \(outputFormat.mSampleRate)")
@@ -123,7 +125,7 @@ class AudioUnitManager {
 		print("  Format flags: \(outputFormat.mFormatFlags)")
 		
 		// Set maximum frames per slice
-		var maxFrames: UInt32 = 4096
+		var maxFrames: UInt32 = config.bufferSize
 		AudioUnitSetProperty(
 			au,
 			kAudioUnitProperty_MaximumFramesPerSlice,
@@ -181,22 +183,21 @@ class AudioUnitManager {
 		inTimeStamp.mSampleTime = sampleTime
 		inTimeStamp.mFlags = .sampleTimeValid
 		
-		// Use AudioBufferList.allocate for safety
-		let audioBufferList = AudioBufferList.allocate(maximumBuffers: 2)
+		// Allocate buffers for actual channel count
+		let audioBufferList = AudioBufferList.allocate(maximumBuffers: Int(channelCount))
 		defer { audioBufferList.unsafeMutablePointer.deallocate() }
 		
-		for i in 0..<2 {
+		for i in 0..<Int(channelCount) {
 			audioBufferList[i] = AudioBuffer(
 				mNumberChannels: 1,
 				mDataByteSize: frames * 4,
 				mData: malloc(Int(frames * 4))
 			)
-			// Clear the buffer
 			memset(audioBufferList[i].mData, 0, Int(frames * 4))
 		}
 		
 		defer {
-			for i in 0..<2 {
+			for i in 0..<Int(channelCount) {
 				free(audioBufferList[i].mData)
 			}
 		}
@@ -214,11 +215,36 @@ class AudioUnitManager {
 		if renderStatus == noErr {
 			sampleTime += Float64(frames)
 			
-			// Get left channel data for network transmission
-			if let audioData = audioBufferList[0].mData {
-				let floatPointer = audioData.assumingMemoryBound(to: Float.self)
+			// Interleave all channels: frame0_ch0, frame0_ch1, ..., frame1_ch0, frame1_ch1, ...
+			let totalSamples = Int(frames) * Int(channelCount)
+			var interleavedData = Data(count: totalSamples * 4)
+			
+			interleavedData.withUnsafeMutableBytes { destPointer in
+				guard let destBase = destPointer.baseAddress?.assumingMemoryBound(to: Float.self) else {
+					return
+				}
 				
-				// Check for audio (optional monitoring)
+				// Get pointers to each channel's data
+				var channelPointers: [UnsafePointer<Float>] = []
+				for i in 0..<Int(channelCount) {
+					if let data = audioBufferList[i].mData {
+						channelPointers.append(data.assumingMemoryBound(to: Float.self))
+					}
+				}
+				
+				// Interleave: for each frame, copy all channel samples
+				for frame in 0..<Int(frames) {
+					for channel in 0..<Int(channelCount) {
+						let destIndex = frame * Int(channelCount) + channel
+						destBase[destIndex] = channelPointers[channel][frame]
+					}
+				}
+			}
+			
+			// Monitor audio level on first channel
+			if let firstChannelData = audioBufferList[0].mData {
+				let floatPointer = firstChannelData.assumingMemoryBound(to: Float.self)
+				
 				var maxSample: Float = 0
 				var nonZeroCount = 0
 				for i in 0..<Int(frames) {
@@ -234,10 +260,10 @@ class AudioUnitManager {
 				if maxSample > 0.0001 {
 					verboseLog("Audio level: \(maxSample), non-zero: \(nonZeroCount)/\(frames)")
 				}
-				
-				return Data(bytes: audioData, count: Int(frames * 4))
 			}
-		} else if renderStatus != -10878 {  // -10878 is kAudioUnitErr_InvalidParameter
+			
+			return interleavedData
+		} else if renderStatus != -10878 {
 			verboseLog("Render error: \(renderStatus)")
 		}
 		
