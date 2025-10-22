@@ -1,5 +1,10 @@
 import Foundation
 
+enum AudioFormat {
+	case interleaved
+	case planar
+}
+
 struct Config {
 	let componentSubType: String
 	let componentManufacturer: String
@@ -11,6 +16,7 @@ struct Config {
 	let rpcEnabled: Bool
 	let rpcPollInterval: Double
 	let bufferSize: UInt32
+	let audioFormat: AudioFormat
 	
 	static func parse() -> Config {
 		let args = CommandLine.arguments
@@ -25,6 +31,7 @@ struct Config {
 		var rpcEnabled = false
 		var rpcPollInterval = 0.5
 		var bufferSize: UInt32 = 512
+		var audioFormat: AudioFormat = .interleaved
 		
 		var i = 1
 		while i < args.count {
@@ -83,6 +90,19 @@ struct Config {
 				}
 				bufferSize = UInt32(args[i + 1]) ?? 512
 				i += 2
+			case "--format":
+				guard i + 1 < args.count else {
+					fatalError("Missing value for --format")
+				}
+				switch args[i + 1].lowercased() {
+				case "planar":
+					audioFormat = .planar
+				case "interleaved":
+					audioFormat = .interleaved
+				default:
+					fatalError("Invalid format: \(args[i + 1]). Use 'planar' or 'interleaved'")
+				}
+				i += 2
 			case "--help":
 				printUsage()
 				exit(0)
@@ -109,7 +129,8 @@ struct Config {
 			rpcPort: rpcPort,
 			rpcEnabled: rpcEnabled,
 			rpcPollInterval: rpcPollInterval,
-			bufferSize: bufferSize
+			bufferSize: bufferSize,
+			audioFormat: audioFormat
 		)
 	}
 	
@@ -126,6 +147,7 @@ struct Config {
 		  -p, --port PORT                 TCP port (default: 9999)
 		  -h, --host HOST                 TCP host (default: 127.0.0.1)
 		  --buffer-size SIZE              Audio buffer size in frames (default: 512)
+		  --format FORMAT                 Audio format: 'interleaved' or 'planar' (default: interleaved)
 		  --enable-rpc                    Enable JSON-RPC monitoring
 		  --rpc-host HOST                 JSON-RPC host (default: 127.0.0.1)
 		  --rpc-port PORT                 JSON-RPC port (default: 8081)
@@ -135,6 +157,7 @@ struct Config {
 		Example:
 		  AudioUnitHost --subtype "Pt9q" --manufacturer "Mdrt" --verbose
 		  AudioUnitHost --subtype "Pt9q" --manufacturer "Mdrt" --enable-rpc
+		  AudioUnitHost --subtype "Pt9q" --manufacturer "Mdrt" --format planar
 		""")
 	}
 }

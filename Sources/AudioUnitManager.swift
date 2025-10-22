@@ -6,10 +6,12 @@ class AudioUnitManager {
 	let audioUnit: AudioComponentInstance
 	let outputFormat: AudioStreamBasicDescription
 	let channelCount: UInt32
+	let config: Config
 	private var sampleTime: Float64 = 0
 	private let renderLock = NSLock()
 	
 	init(config: Config) throws {
+		self.config = config
 		verboseLog("Searching for audio unit with subtype: \(config.componentSubType), manufacturer: \(config.componentManufacturer)")
 		
 		// Try multiple search strategies for macOS 26 compatibility
@@ -123,9 +125,10 @@ class AudioUnitManager {
 		print("  Channels: \(outputFormat.mChannelsPerFrame)")
 		print("  Bits per channel: \(outputFormat.mBitsPerChannel)")
 		print("  Format flags: \(outputFormat.mFormatFlags)")
+		print("  Output format: \(config.audioFormat == .planar ? "planar" : "interleaved")")
 		
 		// Set maximum frames per slice
-		var maxFrames: UInt32 = config.bufferSize
+		var maxFrames = config.bufferSize
 		AudioUnitSetProperty(
 			au,
 			kAudioUnitProperty_MaximumFramesPerSlice,
@@ -215,30 +218,59 @@ class AudioUnitManager {
 		if renderStatus == noErr {
 			sampleTime += Float64(frames)
 			
-			// Interleave all channels: frame0_ch0, frame0_ch1, ..., frame1_ch0, frame1_ch1, ...
-			let totalSamples = Int(frames) * Int(channelCount)
-			var interleavedData = Data(count: totalSamples * 4)
+			// Format data based on config
+			let outputData: Data
 			
-			interleavedData.withUnsafeMutableBytes { destPointer in
-				guard let destBase = destPointer.baseAddress?.assumingMemoryBound(to: Float.self) else {
-					return
-				}
+			switch config.audioFormat {
+			case .interleaved:
+				// Interleave all channels: frame0_ch0, frame0_ch1, ..., frame1_ch0, frame1_ch1, ...
+				let totalSamples = Int(frames) * Int(channelCount)
+				var interleavedData = Data(count: totalSamples * 4)
 				
-				// Get pointers to each channel's data
-				var channelPointers: [UnsafePointer<Float>] = []
-				for i in 0..<Int(channelCount) {
-					if let data = audioBufferList[i].mData {
-						channelPointers.append(data.assumingMemoryBound(to: Float.self))
+				interleavedData.withUnsafeMutableBytes { destPointer in
+					guard let destBase = destPointer.baseAddress?.assumingMemoryBound(to: Float.self) else {
+						return
+					}
+					
+					// Get pointers to each channel's data
+					var channelPointers: [UnsafePointer<Float>] = []
+					for i in 0..<Int(channelCount) {
+						if let data = audioBufferList[i].mData {
+							channelPointers.append(data.assumingMemoryBound(to: Float.self))
+						}
+					}
+					
+					// Interleave: for each frame, copy all channel samples
+					for frame in 0..<Int(frames) {
+						for channel in 0..<Int(channelCount) {
+							let destIndex = frame * Int(channelCount) + channel
+							destBase[destIndex] = channelPointers[channel][frame]
+						}
 					}
 				}
+				outputData = interleavedData
 				
-				// Interleave: for each frame, copy all channel samples
-				for frame in 0..<Int(frames) {
+			case .planar:
+				// Concatenate channels: all of ch0, then all of ch1, etc.
+				let bytesPerChannel = Int(frames) * 4
+				var planarData = Data(count: bytesPerChannel * Int(channelCount))
+				
+				planarData.withUnsafeMutableBytes { destPointer in
+					guard let destBase = destPointer.baseAddress?.assumingMemoryBound(to: Float.self) else {
+						return
+					}
+					
 					for channel in 0..<Int(channelCount) {
-						let destIndex = frame * Int(channelCount) + channel
-						destBase[destIndex] = channelPointers[channel][frame]
+						if let channelData = audioBufferList[channel].mData {
+							let sourcePointer = channelData.assumingMemoryBound(to: Float.self)
+							let destOffset = channel * Int(frames)
+							for frame in 0..<Int(frames) {
+								destBase[destOffset + frame] = sourcePointer[frame]
+							}
+						}
 					}
 				}
+				outputData = planarData
 			}
 			
 			// Monitor audio level on first channel
@@ -262,7 +294,7 @@ class AudioUnitManager {
 				}
 			}
 			
-			return interleavedData
+			return outputData
 		} else if renderStatus != -10878 {
 			verboseLog("Render error: \(renderStatus)")
 		}
@@ -311,4 +343,3 @@ extension AudioUnitError: LocalizedError {
 		}
 	}
 }
-
